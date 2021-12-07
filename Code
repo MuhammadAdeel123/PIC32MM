@@ -1,0 +1,125 @@
+#pragma config SOSCHP = OFF             // Secondary Oscillator High Power Enable bit (SOSC oprerates in normal power mode.)
+#pragma config USERID = 0xFFFF          // User ID bits (Enter Hexadecimal value)
+
+// FICD
+#pragma config JTAGEN = ON              // JTAG Enable bit (JTAG is enabled)
+#pragma config ICS = PGx1               // ICE/ICD Communication Channel Selection bits (Communicate on PGEC1/PGED1)
+
+// FPOR
+#pragma config BOREN = BOR3             // Brown-out Reset Enable bits (Brown-out Reset enabled in hardware; SBOREN bit disabled)
+#pragma config RETVR = OFF              // Retention Voltage Regulator Enable bit (Retention regulator is disabled)
+#pragma config LPBOREN = ON             // Low Power Brown-out Enable bit (Low power BOR is enabled, when main BOR is disabled)
+
+// FWDT
+#pragma config SWDTPS = PS1048576       // Sleep Mode Watchdog Timer Postscale Selection bits (1:1048576)
+#pragma config FWDTWINSZ = PS25_0       // Watchdog Timer Window Size bits (Watchdog timer window size is 25%)
+#pragma config WINDIS = OFF             // Windowed Watchdog Timer Disable bit (Watchdog timer is in non-window mode)
+#pragma config RWDTPS = PS1048576       // Run Mode Watchdog Timer Postscale Selection bits (1:1048576)
+#pragma config RCLKSEL = LPRC           // Run Mode Watchdog Timer Clock Source Selection bits (Clock source is LPRC (same as for sleep mode))
+#pragma config FWDTEN = ON              // Watchdog Timer Enable bit (WDT is enabled)
+
+// FOSCSEL
+#pragma config FNOSC = LPRC             // Oscillator Selection bits (Low power RC oscillator (LPRC))
+#pragma config PLLSRC = FRC             // System PLL Input Clock Selection bit (FRC oscillator is selected as PLL reference input on device reset)
+#pragma config SOSCEN = ON              // Secondary Oscillator Enable bit (Secondary oscillator is enabled)
+#pragma config IESO = ON                // Two Speed Startup Enable bit (Two speed startup is enabled)
+#pragma config POSCMOD = OFF            // Primary Oscillator Selection bit (Primary oscillator is disabled)
+#pragma config OSCIOFNC = OFF           // System Clock on CLKO Pin Enable bit (OSCO pin operates as a normal I/O)
+#pragma config SOSCSEL = OFF            // Secondary Oscillator External Clock Enable bit (SOSC pins configured for Crystal mode)
+#pragma config FCKSM = CSECME           // Clock Switching and Fail-Safe Clock Monitor Enable bits (Clock switching is enabled; Fail-safe clock monitor is enabled)
+
+// FSEC
+#pragma config CP = OFF                 // Code Protection Enable bit (Code protection is disabled)
+#include <xc.h>
+#define RF_RX PORTBbits.RB5  // RB5 as input for RF receiver 
+
+int time_taken,distance;
+unsigned char byte = 0;
+void calculate_distance(){
+    TMR1 = 0; // Set the initial value of timer
+    PORTBbits.RB0 = 1;         //TRIGGER HIGH
+    for(float i=0.00;i<=0.01;i=i+0.001)         //10uS Delay 
+    PORTBbits.RB0 = 0;        //TRIGGER LOW
+    while(!PORTBbits.RB4); //Waiting for Echo  
+    T1CONbits.TON = 1;     //Timer Starts
+    while(PORTBbits.RB4);
+    T1CONbits.TON = 0;    //Timer Stops
+    time_taken=TMR1;
+    distance= (0.0272*time_taken)/2;  
+}
+void back_off(){
+    PORTCbits.RC2 = 1; PORTCbits.RC3 = 0; //Motor 1 pins declared as output
+    PORTCbits.RC8 = 0; PORTCbits.RC9 = 1; //Motor 2 pins declared as output
+    
+}
+void delay(int a){
+    for (int i=0;i<=a;i++){
+    }
+    
+}
+   
+void main() { 
+    PORTBbits.RB4 =1;         //RB4 as Input PIN (ECHO)
+    PORTBbits.RB5 =1; // RB5 as input to read receiver data
+    PORTBbits.RB6 =0;    // RB6 as output for relay to control motor power 
+    PORTCbits.RC0 = 1; PORTCbits.RC1 = 1; //Both the IR sensor pins are declared as input
+    PORTCbits.RC2 = 0; PORTCbits.RC3 = 0; //Motor 1 pins declared as output
+    PORTCbits.RC8 = 0; PORTCbits.RC9 = 0; //Motor 2 pins declared as output
+    T1CON = 0x10; // initialize the timer 
+    CCP1CON1=0100; // initialize the CCP timer register
+    INTCON=1;
+    CCP1TMR=100; // Load the time value for 1ms; delayValue can be between 0-256 only
+    //_CCP1_VECTOR=1;
+    while (1) {
+        byte = RF_RX;
+        if (byte>0)
+        {
+            PORTBbits.RB6 =1; // if signal received at receiver side relay is activated to provide power to motor  
+        }
+        else{
+             PORTBbits.RB6 =0; // // if signal received at receiver side relay is deactivated to cut off power to motor
+        }
+        calculate_distance();        
+        if (distance>5)
+        {
+            PORTCbits.RC2 = 0; PORTCbits.RC3 = 1; //Motor 1 forward
+            PORTCbits.RC8 = 1; PORTCbits.RC9 = 0; //Motor 2 forward 
+        }
+         
+        calculate_distance();   
+         if (PORTCbits.RC0==0 && PORTCbits.RC1==1 && distance<=5) //Left sensor is blocked
+         {
+         back_off();
+         PORTCbits.RC2=1; PORTCbits.RC3=1; //Motor 1 stop
+         PORTCbits.RC8=1; PORTCbits.RC9=0; //Motor 2 forward  
+         delay(500);
+         }
+        
+        calculate_distance();   
+         if (PORTCbits.RC0==1 && PORTCbits.RC1==0 && distance<=5) //Right sensor is blocked
+         {
+         back_off();
+         PORTCbits.RC2=0; PORTCbits.RC3=1; //Motor 1 forward
+         PORTCbits.RC8=1; PORTCbits.RC9=1; //Motor 2 stop
+         delay(500);
+         } 
+        
+        calculate_distance();   
+         if (PORTCbits.RC0==0 && PORTCbits.RC0==0 && distance<=5)//Both sensor is open
+         {
+         back_off();
+         PORTCbits.RC2=0; PORTCbits.RC3=1; //Motor 1 forward
+         PORTCbits.RC8=1; PORTCbits.RC9=1; //Motor 2 stop
+         delay(500);
+         }
+        
+        calculate_distance();   
+         if (PORTCbits.RC0==1 && PORTCbits.RC1==1 && distance<=5)//Both sensor is blocked
+         {
+         back_off(); 
+         PORTCbits.RC2=1; PORTCbits.RC3=0; //Motor 1 reverse
+         PORTCbits.RC8=1; PORTCbits.RC9=1; //Motor 2 stop  
+         delay(1000);
+         }           
+         }
+    }
